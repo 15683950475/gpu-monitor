@@ -19,7 +19,7 @@ jobs:
       - name: Run monitor
         env:
           GPUSHARE_TOKEN: ${{ secrets.GPUSHARE_TOKEN }}
-          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
         run: python monitor.py
       - name: Commit state
         run: |
