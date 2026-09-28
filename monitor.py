@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-import os, sys, json, time, urllib.request, urllib.parse
+import os, sys, json, time, urllib.request
 from datetime import datetime
 
 GPUSHARE_TOKEN = os.environ.get("GPUSHARE_TOKEN", "")
-SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY", "")
+WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK", "")
 MIN_CUDA = 12.8
 MIN_BANDWIDTH = 400
 API_BASE = "https://api.gpushare.com/app/api"
 STATE_FILE = os.path.join(os.path.dirname(__file__), "last_state.json")
 RUN_SECONDS = 5 * 3600 + 50 * 60
-CHECK_INTERVAL = 5
+CHECK_INTERVAL = 30
 
 def api_get(path, token):
     url = f"{API_BASE}{path}"
@@ -62,16 +62,17 @@ def filter_machines(machines):
         results.append({"name": m.get("machineName", "?"), "gpu": gpu, "free": free, "total": m.get("gpuNum", 0), "cuda": m.get("baseInfo", {}).get("gpuToolkitVersion", "?"), "bandwidth": dl_mbps, "price": price})
     return results
 
-def send_serverchan(title, desp):
-    if not SERVERCHAN_KEY:
+def send_wecom(title, desp):
+    if not WECOM_WEBHOOK:
         print(f"[Notification] {title}\n{desp}")
         return
-    url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
-    data = urllib.parse.urlencode({"title": title, "desp": desp}).encode()
+    content = f"## {title}\n{desp}"
+    body = json.dumps({"msgtype": "markdown", "markdown": {"content": content}}).encode()
     try:
-        urllib.request.urlopen(url, data=data, timeout=10)
+        req = urllib.request.Request(WECOM_WEBHOOK, data=body, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
     except Exception as e:
-        print(f"[ServerChan error] {e}")
+        print(f"[WeCom error] {e}")
 
 def load_previous():
     try:
@@ -90,14 +91,14 @@ def main():
         sys.exit(1)
     start = time.time()
     prev_keys = load_previous()
-    first_run = True
+    first_run = len(prev_keys) == 0
     auth_notified = False
     while time.time() - start < RUN_SECONDS:
         now = datetime.now().strftime("%H:%M:%S")
         result = fetch_all_machines(GPUSHARE_TOKEN)
         if result == "AUTH_EXPIRED":
             if not auth_notified:
-                send_serverchan("GPU Monitor - Token expired!", "gpushare token expired. Update GPUSHARE_TOKEN in GitHub Secrets.")
+                send_wecom("GPU Monitor - Token expired!", "gpushare token expired. Update GPUSHARE_TOKEN in GitHub Secrets.")
                 auth_notified = True
             print(f"[{now}] TOKEN EXPIRED")
             break
@@ -108,8 +109,8 @@ def main():
             if first_run or new_machines:
                 lines = [f"- **{m['name']}** | free: {m['free']}/{m['total']} | CUDA {m['cuda']} | {m['bandwidth']}Mbps | ${m['price']}/hr" for m in matches]
                 label = "Current machines" if first_run else f"FOUND {len(new_machines)} new!"
-                desp = f"### {label}\n\n" + "\n".join(lines) + "\n\n[Open gpushare](https://www.gpushare.com/store)"
-                send_serverchan(f"GPU Monitor: {label}", desp)
+                desp = "\n".join(lines) + "\n[Open gpushare](https://www.gpushare.com/store)"
+                send_wecom(f"GPU1: {label}", desp)
                 print(f"[{now}] Pushed: {len(matches)} machine(s), {len(new_machines)} new")
                 first_run = False
             else:
