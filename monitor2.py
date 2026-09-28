@@ -72,7 +72,8 @@ def send_wecom(title, desp):
         print(f"[Notification] {title}\n{desp}")
         return
     content = f"## {title}\n{desp}"
-    body = json.dumps({"msgtype": "markdown", "markdown": {"content": content}}).encode()
+    payload = {"msgtype": "markdown", "markdown": {"content": content}}
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     try:
         req = urllib.request.Request(WECOM_WEBHOOK, data=body, headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=10)
@@ -103,7 +104,7 @@ def main():
         result = fetch_all_machines(GPUSHARE_TOKEN)
         if result == "AUTH_EXPIRED":
             if not auth_notified:
-                send_wecom("GPU2 - Token expired!", "gpushare token expired. Update GPUSHARE_TOKEN in GitHub Secrets.")
+                send_wecom("GPU2 Token expired", "gpushare token expired. Update GPUSHARE_TOKEN in GitHub Secrets.")
                 auth_notified = True
             print(f"[{now}] TOKEN EXPIRED")
             break
@@ -112,8 +113,8 @@ def main():
         if matches:
             new_machines = current_keys - prev_keys
             if first_run or new_machines:
-                lines = [f"- **{m['name']}** | {m['gpu']} | free: {m['free']}/{m['total']} | CUDA {m['cuda']} | {m['bandwidth']}Mbps | ${m['price']}/hr" for m in matches]
-                label = "Current GPUs" if first_run else f"FOUND {len(new_machines)} new GPU(s)!"
+                lines = [f"- {m['name']} | {m['gpu']} | free: {m['free']}/{m['total']} | CUDA {m['cuda']} | {m['bandwidth']}Mbps | ${m['price']}/hr" for m in matches]
+                label = "Current GPUs" if first_run else f"Found {len(new_machines)} new GPU(s)!"
                 desp = "\n".join(lines) + "\n[Open gpushare](https://www.gpushare.com/store)"
                 send_wecom(f"GPU2: {label}", desp)
                 print(f"[{now}] Pushed: {len(matches)} machine(s), {len(new_machines)} new")
