@@ -90,7 +90,7 @@ def main():
         sys.exit(1)
     start = time.time()
     prev_keys = load_previous()
-        first_run = True
+    first_run = True
     auth_notified = False
     while time.time() - start < RUN_SECONDS:
         now = datetime.now().strftime("%H:%M:%S")
