@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""
+gpushare 3090/3090Ti availability monitor
+Runs on GitHub Actions, pushes notifications via ServerChan.
+"""
+import os
+import sys
+import json
+import time
+import urllib.request
+import urllib.parse
+from datetime import datetime
+
+# ---- Config from env vars ----
+GPUSHARE_TOKEN = os.environ.get("GPUSHARE_TOKEN", "")
+SERVERCHAN_KEY = os.environ.get("SERVERCHAN_KEY", "")
+MIN_CUDA = 12.8
+MIN_BANDWIDTH = 400  # Mbps
+API_BASE = "https://api.gpushare.com/app/api"
+STATE_FILE = os.path.join(os.path.dirname(__file__), "last_state.json")
+
+
+def api_get(path, token):
+    url = f"{API_BASE}{path}"
+    req = urllib.request.Request(url)
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Origin", "https://www.gpushare.com")
+    req.add_header("Referer", "https://www.gpushare.com/store")
+    req.add_header("User-Agent", "Mozilla/5.0")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            return None  # auth expired
+        raise
+
+
+def fetch_all_machines(token):
+    all_machines = []
+    for page in range(1, 5):
+        qs = urllib.parse.urlencode({
+            "models": -1, "gpuName": "", "priceOrder": "asc",
+            "pn": page, "ps": 50
+        })
+        data = api_get(f"/market/machine/list?{qs}", token)
+        if data is None:
+            return "AUTH_EXPIRED"
+        if not data or "data" not in data:
+            break
+        all_machines.extend(data["data"]["list"])
+        if page * 50 >= data["data"]["total"]:
+            break
+    return all_machines
+
+
+def filter_machines(machines):
+    results = []
+    for m in machines:
+        gpu = m.get("baseInfo", {}).get("gpuName", "")
+        if "3090" not in gpu:
+            continue
+        if not m.get("isOnline"):
+            continue
+        free = m.get("gpuNum", 0) - m.get("gpuUsed", 0)
+        if free <= 0:
+            continue
+        cuda = float(m.get("baseInfo", {}).get("gpuToolkitVersion", "0"))
+        if cuda < MIN_CUDA:
+            continue
+        dl_bytes = int(m.get("baseInfo", {}).get("netDownloadSpeed", 0))
+        dl_mbps = round(dl_bytes * 8 / 1_000_000)
+        if dl_mbps < MIN_BANDWIDTH:
+            continue
+        price = next((s.get("price", "?") for s in m.get("skuList", []) if s.get("skuName") == "payg"), "?")
+        results.append({
+            "name": m.get("machineName", "?"),
+            "gpu": gpu,
+            "free": free,
+            "total": m.get("gpuNum", 0),
+            "cuda": m.get("baseInfo", {}).get("gpuToolkitVersion", "?"),
+            "bandwidth": dl_mbps,
+            "price": price,
+        })
+    return results
+
+
+def send_serverchan(title, desp):
+    if not SERVERCHAN_KEY:
+        print(f"[Notification] {title}\n{desp}")
+        return
+    url = f"https://sctapi.ftqq.com/{SERVERCHAN_KEY}.send"
+    data = urllib.parse.urlencode({"title": title, "desp": desp}).encode()
+    try:
+        urllib.request.urlopen(url, data=data, timeout=10)
+    except Exception as e:
+        print(f"[ServerChan error] {e}")
+
+
+def load_previous():
+    try:
+        with open(STATE_FILE, "r") as f:
+            return set(json.load(f))
+    except:
+        return set()
+
+
+def save_current(keys):
+    with open(STATE_FILE, "w") as f:
+        json.dump(list(keys), f)
+
+
+def main():
+    if not GPUSHARE_TOKEN:
+        print("ERROR: GPUSHARE_TOKEN not set")
+        sys.exit(1)
+
+    print(f"[{datetime.now()}] Checking gpushare...")
+    result = fetch_all_machines(GPUSHARE_TOKEN)
+
+    if result == "AUTH_EXPIRED":
+        send_serverchan(
+            "GPU Monitor - Token expired!",
+            "gpushare token expired. Please update GPUSHARE_TOKEN secret in GitHub."
+        )
+        print("TOKEN EXPIRED")
+        return
+
+    matches = filter_machines(result)
+    prev_keys = load_previous()
+    current_keys = set(m["name"] for m in matches)
+
+    if matches:
+        lines = []
+        for m in matches:
+            line = f"- **{m['name']}** | free: {m['free']}/{m['total']} | CUDA {m['cuda']} | {m['bandwidth']}Mbps | ${m['price']}/hr"
+            lines.append(line)
+            print(f"  MATCH: {line}")
+
+        # Only notify on NEW machines (not ones we already reported)
+        new_machines = current_keys - prev_keys
+        if new_machines:
+            title = f"FOUND {len(new_machines)} new 3090(s)!"
+            desp = "### Available now:\n\n" + "\n".join(lines) + \
+                   "\n\n[Open gpushare](https://www.gpushare.com/store)"
+            send_serverchan(title, desp)
+            print(f"  -> Notification sent for {len(new_machines)} new machine(s)")
+        else:
+            print("  (already reported, no new notification)")
+    else:
+        print("  No matching machine")
+
+    save_current(current_keys)
+
+
+if __name__ == "__main__":
+    main()
