@@ -9,7 +9,7 @@ MIN_BANDWIDTH = 400
 API_BASE = "https://api.gpushare.com/app/api"
 STATE_FILE = os.path.join(os.path.dirname(__file__), "last_state.json")
 RUN_SECONDS = 5 * 3600 + 50 * 60
-CHECK_INTERVAL = 30
+CHECK_INTERVAL = 5
 
 def api_get(path, token):
     url = f"{API_BASE}{path}"
