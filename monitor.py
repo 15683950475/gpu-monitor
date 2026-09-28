@@ -44,7 +44,7 @@ def filter_machines(machines):
     results = []
     for m in machines:
         gpu = m.get("baseInfo", {}).get("gpuName", "")
-        if "3090" not in gpu:
+        if "3090" not in gpu and "5060" not in gpu:
             continue
         if not m.get("isOnline"):
             continue
@@ -59,7 +59,7 @@ def filter_machines(machines):
         if dl_mbps < MIN_BANDWIDTH:
             continue
         price = next((s.get("price", "?") for s in m.get("skuList", []) if s.get("skuName") == "payg"), "?")
-        results.append({"name": m.get("machineName", "?"), "gpu": gpu, "free": free, "total": m.get("gpuNum", 0), "cuda": m.get("baseInfo", {}).get("gpuToolkitVersion", "?"), "bandwidth": dl_mbps, "price": price})
+        results.append({"name": m.get("machineName", "?"), "gpu": gpu, "free": free, "total": m.get("gpuNum", 0), "price": price})
     return results
 
 def send_wecom(title, desp):
@@ -108,9 +108,9 @@ def main():
         if matches:
             new_machines = current_keys - prev_keys
             if first_run or new_machines:
-                lines = [f"- {m['name']} | free: {m['free']}/{m['total']} | CUDA {m['cuda']} | {m['bandwidth']}Mbps | ${m['price']}/hr" for m in matches]
-                label = "Current 3090 machines" if first_run else f"Found {len(new_machines)} new 3090!"
-                desp = "\n".join(lines) + "\n[Open gpushare](https://www.gpushare.com/store)"
+                lines = [f"**{m['name']}**\n{m['gpu']} | 空闲 {m['free']}/{m['total']} 卡 | ${m['price']}/h" for m in matches]
+                label = "当前可用" if first_run else f"新增 {len(new_machines)} 台"
+                desp = "\n\n".join(lines) + "\n\n[去抢](https://www.gpushare.com/store)"
                 send_wecom(f"GPU1: {label}", desp)
                 print(f"[{now}] Pushed: {len(matches)} machine(s), {len(new_machines)} new")
                 first_run = False
