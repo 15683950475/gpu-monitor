@@ -56,12 +56,6 @@ def short_gpu(gpu_name, base_info):
         return f"{label} {vram}"
     return label
 
-def parse_price(p):
-    try:
-        return float(p)
-    except:
-        return 9999
-
 def filter_machines(machines):
     results = []
     for m in machines:
@@ -94,7 +88,6 @@ def filter_machines(machines):
             "cuda": cuda_ver,
             "bandwidth": dl_mbps,
             "price": price,
-            "price_num": parse_price(price),
             "rent_url": rent_url
         })
     return results
@@ -144,8 +137,8 @@ def main():
         current_keys = set(m["name"] for m in matches)
         new_machines = current_keys - prev_keys
         if matches and (first_run or new_machines):
-            new_list = sorted([m for m in matches if m["name"] in new_machines], key=lambda x: x["price_num"])
-            old_list = sorted([m for m in matches if m["name"] not in new_machines], key=lambda x: x["price_num"])
+            new_list = sorted([m for m in matches if m["name"] in new_machines], key=lambda x: -x["bandwidth"])
+            old_list = sorted([m for m in matches if m["name"] not in new_machines], key=lambda x: -x["bandwidth"])
             ordered = new_list + old_list
             lines = []
             for m in ordered:
