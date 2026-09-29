@@ -7,11 +7,10 @@ WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK", "")
 TARGET_GPUS = ["3080", "3090", "4090", "4080", "5090", "5060"]
 REQUIRED_CUDA = 13.0
 MIN_BANDWIDTH = 400
-IMAGE_ID = "cuda12.8.93-py3.11-torch2.9.1"
 API_BASE = "https://api.gpushare.com/app/api"
 STATE_FILE = os.path.join(os.path.dirname(__file__), "last_state2.json")
 RUN_SECONDS = 5 * 3600 + 50 * 60
-CHECK_INTERVAL = 10
+CHECK_INTERVAL = 5
 
 def api_get(path, token):
     url = f"{API_BASE}{path}"
@@ -52,9 +51,6 @@ def short_gpu(gpu_name):
             return g.upper()
     return gpu_name
 
-def short_driver(driver):
-    return str(driver).split(".")[0]
-
 def filter_machines(machines):
     results = []
     for m in machines:
@@ -73,10 +69,10 @@ def filter_machines(machines):
         dl_mbps = round(dl_bytes * 8 / 1000000)
         if dl_mbps < MIN_BANDWIDTH:
             continue
-        driver = short_driver(m.get("baseInfo", {}).get("gpuDriverVersion", "?"))
+        driver = str(m.get("baseInfo", {}).get("gpuDriverVersion", "?")).split(".")[0]
         price = next((s.get("price", "?") for s in m.get("skuList", []) if s.get("skuName") == "payg"), "?")
         mid = m.get("id", "")
-        rent_url = f"https://www.gpushare.com/store/hire/create?id={mid}&models=-1&skuName=payg&imageId={IMAGE_ID}"
+        rent_url = f"https://www.gpushare.com/store/hire/create?id={mid}&models=-1&skuName=payg"
         results.append({
             "name": m.get("machineName", "?"),
             "gpu": short_gpu(gpu),
@@ -131,27 +127,24 @@ def main():
             break
         matches = filter_machines(result)
         current_keys = set(m["name"] for m in matches)
-        if matches:
-            new_machines = current_keys - prev_keys
-            if first_run or new_machines:
-                matches_sorted = sorted(matches, key=lambda m: m["name"] not in new_machines)
-                lines = []
-                for m in matches_sorted:
-                    is_new = m["name"] in new_machines and not first_run
-                    tag = "🆕 " if is_new else ""
-                    line = (f"{tag}**{m['gpu']}** | 驱动{m['driver']} | {m['bandwidth']}Mbps | "
-                            f"空闲{m['free']} | ¥{m['price']}/h\n"
-                            f"[点这里租用]({m['rent_url']})")
-                    lines.append(line)
-                label = "当前可用" if first_run else f"新增 {len(new_machines)} 台"
-                desp = "\n\n".join(lines)
-                send_wecom(f"GPU2: {label}", desp)
-                print(f"[{now}] Pushed: {len(matches)} machine(s), {len(new_machines)} new")
-                first_run = False
-            else:
-                print(f"[{now}] {len(matches)} machines (no new)")
+        new_machines = current_keys - prev_keys
+        if matches and (first_run or new_machines):
+            matches_sorted = sorted(matches, key=lambda m: m["name"] not in new_machines)
+            lines = []
+            for m in matches_sorted:
+                is_new = m["name"] in new_machines and not first_run
+                tag = "🆕 " if is_new else ""
+                line = (f"{tag}**{m['gpu']}** | 驱动{m['driver']} | {m['bandwidth']}Mbps | "
+                        f"空闲{m['free']} | ¥{m['price']}/h\n"
+                        f"[点这里租用]({m['rent_url']})")
+                lines.append(line)
+            label = "当前可用" if first_run else f"新增 {len(new_machines)} 台"
+            desp = "\n\n".join(lines)
+            send_wecom(f"GPU2: {label}", desp)
+            print(f"[{now}] Pushed: {len(matches)} machine(s), {len(new_machines)} new")
+            first_run = False
         else:
-            print(f"[{now}] No matching machine")
+            print(f"[{now}] {len(matches)} machines (no new)")
         prev_keys = current_keys
         save_current(current_keys)
         time.sleep(CHECK_INTERVAL)
