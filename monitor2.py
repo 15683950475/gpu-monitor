@@ -5,7 +5,7 @@ from datetime import datetime
 GPUSHARE_TOKEN = os.environ.get("GPUSHARE_TOKEN", "")
 WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK", "")
 TARGET_GPUS = ["3080", "3090", "4090", "4080", "5090", "5060"]
-REQUIRED_CUDA = 13.0
+MIN_CUDA = 12.8
 MIN_BANDWIDTH = 400
 API_BASE = "https://api.gpushare.com/app/api"
 STATE_FILE = os.path.join(os.path.dirname(__file__), "last_state2.json")
@@ -75,13 +75,14 @@ def filter_machines(machines):
         if free <= 0:
             continue
         cuda = float(bi.get("gpuToolkitVersion", "0"))
-        if cuda != REQUIRED_CUDA:
+        if cuda < MIN_CUDA:
             continue
         dl_bytes = int(bi.get("netDownloadSpeed", 0))
         dl_mbps = round(dl_bytes * 8 / 1000000)
         if dl_mbps < MIN_BANDWIDTH:
             continue
         driver = str(bi.get("gpuDriverVersion", "?")).split(".")[0]
+        cuda_ver = bi.get("gpuToolkitVersion", "?")
         price = next((s.get("price", "?") for s in m.get("skuList", []) if s.get("skuName") == "payg"), "?")
         mid = m.get("id", "")
         rent_url = f"https://www.gpushare.com/store/hire/create?id={mid}&models=-1&skuName=payg"
@@ -90,6 +91,7 @@ def filter_machines(machines):
             "gpu": short_gpu(gpu, bi),
             "free": free,
             "driver": driver,
+            "cuda": cuda_ver,
             "bandwidth": dl_mbps,
             "price": price,
             "price_num": parse_price(price),
@@ -149,8 +151,8 @@ def main():
             for m in ordered:
                 is_new = m["name"] in new_machines and not first_run
                 tag = "🆕 " if is_new else ""
-                line = (f"{tag}**{m['gpu']}** | 驱动{m['driver']} | {m['bandwidth']}Mbps | "
-                        f"空闲{m['free']} | ¥{m['price']}/h\n"
+                line = (f"{tag}**{m['gpu']}** | CUDA {m['cuda']} | 驱动{m['driver']} | "
+                        f"{m['bandwidth']}Mbps | 空闲{m['free']} | ¥{m['price']}/h\n"
                         f"[点这里租用]({m['rent_url']})")
                 lines.append(line)
             label = "当前可用" if first_run else f"新增 {len(new_machines)} 台"
