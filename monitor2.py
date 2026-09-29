@@ -45,11 +45,16 @@ def gpu_matches(gpu_name):
     name = gpu_name.upper()
     return any(g.upper() in name for g in TARGET_GPUS)
 
-def short_gpu(gpu_name):
+def short_gpu(gpu_name, base_info):
+    vram = base_info.get("gpuMemory", "") or base_info.get("memory", "") or base_info.get("vram", "")
+    label = gpu_name.upper()
     for g in TARGET_GPUS:
         if g.upper() in gpu_name.upper():
-            return g.upper()
-    return gpu_name
+            label = g.upper()
+            break
+    if vram:
+        return f"{label} {vram}"
+    return label
 
 def parse_price(p):
     try:
@@ -60,7 +65,8 @@ def parse_price(p):
 def filter_machines(machines):
     results = []
     for m in machines:
-        gpu = m.get("baseInfo", {}).get("gpuName", "")
+        bi = m.get("baseInfo", {})
+        gpu = bi.get("gpuName", "")
         if not gpu_matches(gpu):
             continue
         if not m.get("isOnline"):
@@ -68,20 +74,20 @@ def filter_machines(machines):
         free = m.get("gpuNum", 0) - m.get("gpuUsed", 0)
         if free <= 0:
             continue
-        cuda = float(m.get("baseInfo", {}).get("gpuToolkitVersion", "0"))
+        cuda = float(bi.get("gpuToolkitVersion", "0"))
         if cuda != REQUIRED_CUDA:
             continue
-        dl_bytes = int(m.get("baseInfo", {}).get("netDownloadSpeed", 0))
+        dl_bytes = int(bi.get("netDownloadSpeed", 0))
         dl_mbps = round(dl_bytes * 8 / 1000000)
         if dl_mbps < MIN_BANDWIDTH:
             continue
-        driver = str(m.get("baseInfo", {}).get("gpuDriverVersion", "?")).split(".")[0]
+        driver = str(bi.get("gpuDriverVersion", "?")).split(".")[0]
         price = next((s.get("price", "?") for s in m.get("skuList", []) if s.get("skuName") == "payg"), "?")
         mid = m.get("id", "")
         rent_url = f"https://www.gpushare.com/store/hire/create?id={mid}&models=-1&skuName=payg"
         results.append({
             "name": m.get("machineName", "?"),
-            "gpu": short_gpu(gpu),
+            "gpu": short_gpu(gpu, bi),
             "free": free,
             "driver": driver,
             "bandwidth": dl_mbps,
@@ -136,7 +142,6 @@ def main():
         current_keys = set(m["name"] for m in matches)
         new_machines = current_keys - prev_keys
         if matches and (first_run or new_machines):
-            # new machines first (by price), then rest (by price)
             new_list = sorted([m for m in matches if m["name"] in new_machines], key=lambda x: x["price_num"])
             old_list = sorted([m for m in matches if m["name"] not in new_machines], key=lambda x: x["price_num"])
             ordered = new_list + old_list
