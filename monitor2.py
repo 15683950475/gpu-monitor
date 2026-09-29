@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-import os, sys, json, time, urllib.request
+import os, sys, json, time, urllib.request, urllib.parse
 from datetime import datetime
 
 GPUSHARE_TOKEN = os.environ.get("GPUSHARE_TOKEN", "")
 WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK", "")
+TARGET_GPUS = ["3080", "3090", "4090", "4080", "5090", "5060"]
 REQUIRED_CUDA = 13.0
 MIN_BANDWIDTH = 400
 API_BASE = "https://api.gpushare.com/app/api"
@@ -23,7 +24,7 @@ def api_get(path, token):
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            return "AUTH_EXPIRED"
+            return None
         raise
 
 def fetch_all_machines(token):
@@ -40,35 +41,21 @@ def fetch_all_machines(token):
             break
     return all_machines
 
-def extract_gpu_short_name(full_gpu_name):
-    # 优先级高的放前面，防止匹配错误
-    if "5060Ti" in full_gpu_name:
-        return "5060Ti"
-    elif "5090D" in full_gpu_name:
-        return "5090D"
-    elif "5090" in full_gpu_name:
-        return "5090"
-    elif "4080S" in full_gpu_name:
-        return "4080S"
-    elif "4090 48G" in full_gpu_name:
-        return "4090 48G"
-    elif "4090" in full_gpu_name:
-        return "4090 24G"
-    elif "3090Ti" in full_gpu_name:
-        return "3090Ti"
-    elif "3090" in full_gpu_name:
-        return "3090 24G"
-    elif "3080 20G" in full_gpu_name:
-        return "3080 20G"
-    return full_gpu_name
+def gpu_matches(gpu_name):
+    name = gpu_name.upper()
+    return any(g.upper() in name for g in TARGET_GPUS)
+
+def short_gpu(gpu_name):
+    for g in TARGET_GPUS:
+        if g.upper() in gpu_name.upper():
+            return g.upper()
+    return gpu_name
 
 def filter_machines(machines):
-    target_list = ["3080 20G","3090 24G","3090Ti","4090 48G","4080S","4090 24G","5090","5090D","5060Ti"]
     results = []
     for m in machines:
-        gpu_full = m.get("baseInfo", {}).get("gpuName", "")
-        short_gpu = extract_gpu_short_name(gpu_full)
-        if short_gpu not in target_list:
+        gpu = m.get("baseInfo", {}).get("gpuName", "")
+        if not gpu_matches(gpu):
             continue
         if not m.get("isOnline"):
             continue
@@ -82,15 +69,18 @@ def filter_machines(machines):
         dl_mbps = round(dl_bytes * 8 / 1000000)
         if dl_mbps < MIN_BANDWIDTH:
             continue
+        driver = m.get("baseInfo", {}).get("gpuDriverVersion", "?")
         price = next((s.get("price", "?") for s in m.get("skuList", []) if s.get("skuName") == "payg"), "?")
+        mid = m.get("id", "")
+        rent_url = f"https://www.gpushare.com/store/hire/create?id={mid}&models=-1&skuName=payg"
         results.append({
-            "gpu": short_gpu,
+            "name": m.get("machineName", "?"),
+            "gpu": short_gpu(gpu),
             "free": free,
-            "total": m.get("gpuNum", 0),
-            "cuda": m.get("baseInfo", {}).get("gpuToolkitVersion", "?"),
+            "driver": driver,
             "bandwidth": dl_mbps,
             "price": price,
-            "machineName": m.get("machineName")
+            "rent_url": rent_url
         })
     return results
 
@@ -128,29 +118,37 @@ def main():
     auth_notified = False
     while time.time() - start < RUN_SECONDS:
         now = datetime.now().strftime("%H:%M:%S")
-        raw_result = fetch_all_machines(GPUSHARE_TOKEN)
-        if raw_result == "AUTH_EXPIRED":
+        result = fetch_all_machines(GPUSHARE_TOKEN)
+        if result == "AUTH_EXPIRED":
             if not auth_notified:
-                send_wecom("GPU2 Token expired", "gpushare token expired. Update GPUSHARE_TOKEN in GitHub Secrets.")
+                send_wecom("GPU2 Token expired", "Update GPUSHARE_TOKEN in GitHub Secrets.")
                 auth_notified = True
             print(f"[{now}] TOKEN EXPIRED")
             break
-        matches = filter_machines(raw_result)
-        # 用机器名称作为唯一标识判断新增
-        current_keys = set(item["machineName"] for item in matches)
-        new_machines = current_keys - prev_keys
-        if first_run or new_machines:
-            line_list = []
-            for m in matches:
-                line_list.append(f"**{m['gpu']}**\nCUDA {m['cuda']} | {m['bandwidth']}Mbps | 空闲 {m['free']}/{m['total']} | ${m['price']}/h")
-            label = "当前可用" if first_run else f"新增 {len(new_machines)} 台"
-            desp = "\n\n".join(line_list) + "\n\n[去抢](https://www.gpushare.com/store)"
-            send_wecom(f"GPU2: {label}", desp)
-            print(f"[{now}] Pushed: {len(matches)} machine(s), {len(new_machines)} new")
-            first_run = False
-        else:
-            if len(matches) >0:
+        matches = filter_machines(result)
+        current_keys = set(m["name"] for m in matches)
+        if matches:
+            new_machines = current_keys - prev_keys
+            if first_run or new_machines:
+                # new machines on top, existing ones below
+                matches_sorted = sorted(matches, key=lambda m: m["name"] not in new_machines)
+                lines = []
+                for m in matches_sorted:
+                    is_new = m["name"] in new_machines and not first_run
+                    tag = "🆕 " if is_new else ""
+                    line = (f"{tag}**{m['gpu']}** | 驱动{m['driver']} | {m['bandwidth']}Mbps | "
+                            f"空闲{m['free']} | ¥{m['price']}/h\n"
+                            f"[点这里租用]({m['rent_url']})")
+                    lines.append(line)
+                label = "当前可用" if first_run else f"新增 {len(new_machines)} 台"
+                desp = "\n\n".join(lines)
+                send_wecom(f"GPU2: {label}", desp)
+                print(f"[{now}] Pushed: {len(matches)} machine(s), {len(new_machines)} new")
+                first_run = False
+            else:
                 print(f"[{now}] {len(matches)} machines (no new)")
+        else:
+            print(f"[{now}] No matching machine")
         prev_keys = current_keys
         save_current(current_keys)
         time.sleep(CHECK_INTERVAL)
