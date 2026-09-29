@@ -7,6 +7,7 @@ WECOM_WEBHOOK = os.environ.get("WECOM_WEBHOOK", "")
 TARGET_GPUS = ["3080", "3090", "4090", "4080", "5090", "5060"]
 REQUIRED_CUDA = 13.0
 MIN_BANDWIDTH = 400
+IMAGE_ID = "cuda12.8.93-py3.11-torch2.9.1"
 API_BASE = "https://api.gpushare.com/app/api"
 STATE_FILE = os.path.join(os.path.dirname(__file__), "last_state2.json")
 RUN_SECONDS = 5 * 3600 + 50 * 60
@@ -51,6 +52,9 @@ def short_gpu(gpu_name):
             return g.upper()
     return gpu_name
 
+def short_driver(driver):
+    return str(driver).split(".")[0]
+
 def filter_machines(machines):
     results = []
     for m in machines:
@@ -69,10 +73,10 @@ def filter_machines(machines):
         dl_mbps = round(dl_bytes * 8 / 1000000)
         if dl_mbps < MIN_BANDWIDTH:
             continue
-        driver = m.get("baseInfo", {}).get("gpuDriverVersion", "?")
+        driver = short_driver(m.get("baseInfo", {}).get("gpuDriverVersion", "?"))
         price = next((s.get("price", "?") for s in m.get("skuList", []) if s.get("skuName") == "payg"), "?")
         mid = m.get("id", "")
-        rent_url = f"https://www.gpushare.com/store/hire/create?id={mid}&models=-1&skuName=payg"
+        rent_url = f"https://www.gpushare.com/store/hire/create?id={mid}&models=-1&skuName=payg&imageId={IMAGE_ID}"
         results.append({
             "name": m.get("machineName", "?"),
             "gpu": short_gpu(gpu),
@@ -130,7 +134,6 @@ def main():
         if matches:
             new_machines = current_keys - prev_keys
             if first_run or new_machines:
-                # new machines on top, existing ones below
                 matches_sorted = sorted(matches, key=lambda m: m["name"] not in new_machines)
                 lines = []
                 for m in matches_sorted:
