@@ -56,6 +56,12 @@ def short_gpu(gpu_name, base_info):
         return f"{label} {vram}"
     return label
 
+def parse_price(p):
+    try:
+        return float(p)
+    except:
+        return 9999
+
 def filter_machines(machines):
     results = []
     for m in machines:
@@ -78,8 +84,10 @@ def filter_machines(machines):
         driver = str(bi.get("gpuDriverVersion", "?")).split(".")[0]
         cuda_ver = bi.get("gpuToolkitVersion", "?")
         price = next((s.get("price", "?") for s in m.get("skuList", []) if s.get("skuName") == "payg"), "?")
+        price_num = parse_price(price)
         mid = m.get("id", "")
         rent_url = f"https://www.gpushare.com/store/hire/create?id={mid}&models=-1&skuName=payg"
+        score = dl_mbps / price_num if price_num > 0 else 0
         results.append({
             "name": m.get("machineName", "?"),
             "gpu": short_gpu(gpu, bi),
@@ -88,6 +96,7 @@ def filter_machines(machines):
             "cuda": cuda_ver,
             "bandwidth": dl_mbps,
             "price": price,
+            "score": score,
             "rent_url": rent_url
         })
     return results
@@ -137,9 +146,7 @@ def main():
         current_keys = set(m["name"] for m in matches)
         new_machines = current_keys - prev_keys
         if matches and (first_run or new_machines):
-            new_list = sorted([m for m in matches if m["name"] in new_machines], key=lambda x: -x["bandwidth"])
-            old_list = sorted([m for m in matches if m["name"] not in new_machines], key=lambda x: -x["bandwidth"])
-            ordered = new_list + old_list
+            ordered = sorted(matches, key=lambda x: -x["score"])
             lines = []
             for m in ordered:
                 is_new = m["name"] in new_machines and not first_run
