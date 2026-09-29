@@ -51,6 +51,12 @@ def short_gpu(gpu_name):
             return g.upper()
     return gpu_name
 
+def parse_price(p):
+    try:
+        return float(p)
+    except:
+        return 9999
+
 def filter_machines(machines):
     results = []
     for m in machines:
@@ -80,6 +86,7 @@ def filter_machines(machines):
             "driver": driver,
             "bandwidth": dl_mbps,
             "price": price,
+            "price_num": parse_price(price),
             "rent_url": rent_url
         })
     return results
@@ -129,9 +136,12 @@ def main():
         current_keys = set(m["name"] for m in matches)
         new_machines = current_keys - prev_keys
         if matches and (first_run or new_machines):
-            matches_sorted = sorted(matches, key=lambda m: m["name"] not in new_machines)
+            # new machines first (by price), then rest (by price)
+            new_list = sorted([m for m in matches if m["name"] in new_machines], key=lambda x: x["price_num"])
+            old_list = sorted([m for m in matches if m["name"] not in new_machines], key=lambda x: x["price_num"])
+            ordered = new_list + old_list
             lines = []
-            for m in matches_sorted:
+            for m in ordered:
                 is_new = m["name"] in new_machines and not first_run
                 tag = "🆕 " if is_new else ""
                 line = (f"{tag}**{m['gpu']}** | 驱动{m['driver']} | {m['bandwidth']}Mbps | "
@@ -141,7 +151,7 @@ def main():
             label = "当前可用" if first_run else f"新增 {len(new_machines)} 台"
             desp = "\n\n".join(lines)
             send_wecom(f"GPU2: {label}", desp)
-            print(f"[{now}] Pushed: {len(matches)} machine(s), {len(new_machines)} new")
+            print(f"[{now}] Pushed: {len(matches)} total, {len(new_machines)} new")
             first_run = False
         else:
             print(f"[{now}] {len(matches)} machines (no new)")
